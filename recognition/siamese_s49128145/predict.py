@@ -1,26 +1,188 @@
+import os
+import numpy as np
 import torch
-from torchvision import transforms
-from PIL import Image
-from modules import SiameseNetwork
-import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = SiameseNetwork().to(device)
-model.load_state_dict(torch.load("siamese_model.pth", map_location=device))
-model.eval()
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor()
-])
+from sklearn.metrics import (
+    roc_curve,
+    confusion_matrix,
+    roc_auc_score,
+    accuracy_score
+)
+from sklearn.manifold import TSNE
 
-def predict(img1_path, img2_path):
-    img1 = transform(Image.open(img1_path).convert('RGB')).unsqueeze(0).to(device)
-    img2 = transform(Image.open(img2_path).convert('RGB')).unsqueeze(0).to(device)
-    out1, out2 = model(img1, img2)
-    dist = F.pairwise_distance(out1, out2).item()
-    print(f"Distance: {dist:.4f}")
-    return "Same class" if dist < 0.5 else "Different class"
+# 🔹 自定义模块
+from dataset import get_isic2020_data, get_isic2020_data_loaders
+from modules import BinaryClassifier, set_seed, get_config
 
-# 示例
-print(predict("test1.jpg", "test2.jpg"))
+
+###############################################################################
+# 📊 Evaluation Metrics
+###############################################################################
+def produce_evaluation_metrics(test_y_pred, test_y_probs, test_y_true):
+    """计算 Accuracy、AUC、Sensitivity、Specificity"""
+    test_accuracy = accuracy_score(test_y_true, test_y_pred)
+    test_auc_roc = roc_auc_score(test_y_true, test_y_probs)
+
+    print(f"✅ Testing Accuracy: {test_accuracy:.4f}")
+    print(f"✅ Testing AUC ROC: {test_auc_roc:.4f}")
+
+    conf_matrix = confusion_matrix(test_y_true, test_y_pred)
+    tn, fp, fn, tp = conf_matrix.ravel()
+
+    sensitivity = tp / (tp + fn + 1e-8)
+    specificity = tn / (tn + fp + 1e-8)
+
+    print(f"✅ Sensitivity (Recall): {sensitivity:.3f}")
+    print(f"✅ Specificity: {specificity:.3f}")
+
+    return test_accuracy, test_auc_roc, sensitivity, specificity
+
+
+###############################################################################
+# 📈 Visualization
+###############################################################################
+def produce_evaluation_figures(test_y_pred, test_y_probs, test_y_true, test_embeddings):
+    """绘制 ROC、混淆矩阵、t-SNE"""
+    os.makedirs("results", exist_ok=True)
+
+    # 🔸 混淆矩阵
+    conf_matrix = confusion_matrix(test_y_true, test_y_pred)
+    conf_matrix_norm = conf_matrix.astype('float') / conf_matrix.sum(axis=1, keepdims=True)
+
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(
+        conf_matrix_norm,
+        annot=True,
+        fmt='.2%',
+        cmap='YlGnBu',
+        xticklabels=['Normal (0)', 'Melanoma (1)'],
+        yticklabels=['Normal (0)', 'Melanoma (1)']
+    )
+    plt.title('Confusion Matrix (Normalized)')
+    plt.xlabel('Predicted Label')
+    plt.ylabel('True Label')
+    plt.tight_layout()
+    plt.savefig('results/confusion_matrix.png')
+    plt.close()
+
+    # 🔸 ROC 曲线
+    fpr, tpr, _ = roc_curve(test_y_true, test_y_probs)
+    plt.figure(figsize=(6, 5))
+    plt.plot(fpr, tpr, color='tomato', lw=2,
+             label='ROC Curve (AUC = %.3f)' % roc_auc_score(test_y_true, test_y_probs))
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
+    plt.legend(loc='lower right')
+    plt.tight_layout()
+    plt.savefig('results/roc_curve.png')
+    plt.close()
+
+    # 🔸 t-SNE 可视化嵌入
+    print("🌀 Running t-SNE (may take 1–2 minutes)...")
+    tsne = TSNE(n_components=2, random_state=42, init='pca', learning_rate='auto')
+    embeddings_2d = tsne.fit_transform(test_embeddings)
+
+    plt.figure(figsize=(6, 5))
+    scatter = plt.scatter(
+        embeddings_2d[:, 0],
+        embeddings_2d[:, 1],
+        c=test_y_true,
+        cmap='coolwarm',
+        alpha=0.6
+    )
+    plt.colorbar(scatter)
+    plt.title('t-SNE Visualization of Feature Embeddings')
+    plt.tight_layout()
+    plt.savefig('results/tsne_embeddings.png')
+    plt.close()
+
+
+###############################################################################
+# 🔮 Prediction
+###############################################################################
+def predict_classifier(model: BinaryClassifier, data_loader: DataLoader, device: str):
+    """在 test_loader 上进行预测"""
+    all_y_pred, all_y_prob, all_y_true, all_embeddings = [], [], [], []
+
+    model.eval()
+    with torch.no_grad():
+        for imgs, labels in data_loader:
+            imgs = imgs.to(device).float()
+            labels = labels.to(device)
+
+            # 提取特征嵌入
+            # 提取 embedding（即 ResNet 特征）
+            embeddings = model.feature_extractor(imgs)
+            embeddings = embeddings.view(embeddings.size(0), -1)
+
+            # 送入分类层
+            outputs = model.fc_layers(embeddings)
+
+
+            probs = torch.softmax(outputs, dim=1)[:, 1]
+            preds = torch.argmax(outputs, dim=1)
+
+            all_y_pred.extend(preds.cpu().numpy())
+            all_y_prob.extend(probs.cpu().numpy())
+            all_y_true.extend(labels.cpu().numpy())
+            all_embeddings.extend(embeddings.cpu().numpy())
+
+    return (
+        np.array(all_y_pred),
+        np.array(all_y_prob),
+        np.array(all_y_true),
+        np.array(all_embeddings),
+    )
+
+
+###############################################################################
+# 🧪 Evaluation Pipeline
+###############################################################################
+def results_classifier(test_loader: DataLoader, model: BinaryClassifier, device: str):
+    """计算指标 + 画图"""
+    test_y_pred, test_y_probs, test_y_true, test_embeddings = predict_classifier(model, test_loader, device)
+    produce_evaluation_metrics(test_y_pred, test_y_probs, test_y_true)
+    produce_evaluation_figures(test_y_pred, test_y_probs, test_y_true, test_embeddings)
+
+
+###############################################################################
+# 🚀 Main
+###############################################################################
+def main():
+    """主评估流程"""
+    set_seed()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"🧠 Using device: {device}")
+
+    config = get_config()
+
+    # 加载模型
+    model = BinaryClassifier(emb_dim=config.get('embedding_dims', 128)).to(device)
+    model.load_state_dict(torch.load("binary_classifier_model.pt", map_location=device))
+    print("✅ Binary classifier model loaded successfully!")
+
+    # 加载数据
+    images, labels = get_isic2020_data(
+        metadata_path=config['metadata_path'],
+        image_dir=config['image_dir'],
+        data_subset=config.get('data_subset', None)
+    )
+
+    _, _, test_loader = get_isic2020_data_loaders(
+        images=images,
+        labels=labels,
+        train_bs=config['batch_size']
+    )
+
+    # 执行评估
+    results_classifier(test_loader, model, device)
+
+
+if __name__ == "__main__":
+    main()
