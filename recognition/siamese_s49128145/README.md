@@ -1,12 +1,10 @@
-# Siamese Network for ISIC 2020 Melanoma Classification
+# Siamese network for Classification of ISIC 2020 Data Set
+## Project Introduction
+### Project Summary and Aim
 
-## Description
-This project implements a **Siamese Neural Network** to classify **melanoma vs normal skin lesions** using the ISIC 2020 dataset. The model learns to measure the similarity between pairs of skin images instead of directly classifying them.
+The objective of this project is to develop a two-stage classifier based on a Siamese network architecture to perform binary classification on the ISIC 2020 Kaggle Challenge dataset, distinguishing between normal and melanoma skin lesions.
 
-##  How It Works
-The network uses a shared **ResNet18 encoder** to extract embeddings from two input images.  
-A **contrastive loss** is used to minimize the distance between embeddings of the same class and maximize it between different classes.
-
+The final model should achieve approximately 0.80 accuracy on the test set, demonstrating strong generalization performance on unseen dermoscopic images.
 
 
 ##  Files

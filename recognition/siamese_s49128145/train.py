@@ -100,81 +100,74 @@ def train_triplet(train_loader, model, optimizer, scheduler, epochs, device):
 ###############################################################################
 # Step 2b: Binary classifier training
 def train_binary_classifier(train_loader, val_loader, triplet_model, classifier, optimizer, scheduler, epochs, device):
+    
+    training_features, training_labels = [], []
+    validation_features, validation_labels = [], []
+
+
+    with torch.no_grad():
+        for anchor, _, _, label in train_loader:
+            features = triplet_model.forward_once(anchor.to(device))
+            training_features.append(features)
+            training_labels.append(label.to(device))
+        for anchor, _, _, label in val_loader:
+            features = triplet_model.forward_once(anchor.to(device))
+            validation_features.append(features)
+            validation_labels.append(label.to(device))
+
+     # Freeze triplet model
     for param in triplet_model.parameters():
-        param.requires_grad = False  # freeze encoder
+        param.requires_grad = False
 
-    best_val_auc = -1
-    train_loss_hist, val_loss_hist = [], []
-    train_acc_hist, val_acc_hist = [], []
+    criterion = nn.CrossEntropyLoss()
 
-    for epoch in range(epochs):
-        classifier.train()
-        train_losses, train_preds, train_labels = [], [], []
+    # Training loop
+    classifier.train()
+    t_loss_total = []
+    for features, labels in zip(training_features, training_labels):
+        optimizer.zero_grad()
+        out = classifier(features)
+        loss = criterion(out, labels)
+        loss.backward()
+        optimizer.step()
+        t_loss_total.append(loss.item())
 
-        for img, label in train_loader:
-            img, label = img.to(device).float(), label.to(device).float()
-            with torch.no_grad():
-                emb = triplet_model.encode(img)
-            output = classifier(emb).squeeze()
-            loss = nn.BCELoss()(output, label)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    # Validation loop
+    classifier.eval()
+    v_loss_total = []
+    with torch.no_grad():
+        for features, labels in zip(validation_features, validation_labels):
+            out = classifier(features)
+            loss = criterion(out, labels)
+            v_loss_total.append(loss.item())
 
-            train_losses.append(loss.item())
-            train_preds.append(output.detach().cpu())
-            train_labels.append(label.cpu())
+    # Metrics
+    avg_train_loss = np.mean(t_loss_total)
+    avg_val_loss = np.mean(v_loss_total)
 
-        avg_train_loss = np.mean(train_losses)
-        train_preds = torch.cat(train_preds).numpy()
-        train_labels = torch.cat(train_labels).numpy()
-        train_acc = accuracy_score(train_labels, train_preds > 0.5)
-        train_auc = roc_auc_score(train_labels, train_preds)
+    train_preds = torch.cat([classifier(f).argmax(1) for f in training_features])
+    train_labels = torch.cat(training_labels)
+    train_acc = (train_preds == train_labels).float().mean().item()
+    train_probs = torch.cat([F.softmax(classifier(f), dim=1)[:,1] for f in training_features]).detach()
+    train_auc = roc_auc_score(train_labels.cpu(), train_probs.cpu())
 
-        # Validation
-        classifier.eval()
-        val_losses, val_preds, val_labels = [], [], []
-        with torch.no_grad():
-            for img, label in val_loader:
-                img, label = img.to(device).float(), label.to(device).float()
-                emb = triplet_model.encode(img)
-                output = classifier(emb).squeeze()
-                val_losses.append(nn.BCELoss()(output, label).item())
-                val_preds.append(output.cpu())
-                val_labels.append(label.cpu())
+    val_preds = torch.cat([classifier(f).argmax(1) for f in validation_features])
+    val_labels = torch.cat(validation_labels)
+    val_acc = (val_preds == val_labels).float().mean().item()
+    val_probs = torch.cat([F.softmax(classifier(f), dim=1)[:,1] for f in validation_features]).detach()
+    val_auc = roc_auc_score(val_labels.cpu(), val_probs.cpu())
 
-        avg_val_loss = np.mean(val_losses)
-        val_preds = torch.cat(val_preds).numpy()
-        val_labels = torch.cat(val_labels).numpy()
-        val_acc = accuracy_score(val_labels, val_preds > 0.5)
-        try:
-            val_auc = roc_auc_score(val_labels, val_preds)
-        except ValueError:
-            val_auc = float('nan')
+    # Scheduler step
+    if isinstance(scheduler, ReduceLROnPlateau):
+        scheduler.step(avg_val_loss)
+    else:
+        scheduler.step()
 
-        # 保存历史
-        train_loss_hist.append(avg_train_loss)
-        val_loss_hist.append(avg_val_loss)
-        train_acc_hist.append(train_acc)
-        val_acc_hist.append(val_acc)
+    print(f"Train Loss: {avg_train_loss:.4f} Acc: {train_acc:.4f} AUC: {train_auc:.4f} | "
+        f"Val Loss: {avg_val_loss:.4f} Acc: {val_acc:.4f} AUC: {val_auc:.4f}")
 
-        if isinstance(scheduler, ReduceLROnPlateau):
-            scheduler.step(avg_val_loss)
-        else:
-            scheduler.step()
-
-        print(f"[{strftime('%H:%M:%S', gmtime())}] Epoch {epoch+1}/{epochs} | "
-              f"Train Loss: {avg_train_loss:.4f} Acc: {train_acc:.4f} AUC: {train_auc:.4f} | "
-              f"Val Loss: {avg_val_loss:.4f} Acc: {val_acc:.4f} AUC: {val_auc:.4f}")
-
-        if not np.isnan(val_auc) and val_auc > best_val_auc:
-            best_val_auc = val_auc
-            torch.save(classifier.state_dict(), "binary_classifier_model.pt")
-            print(f"Saved best classifier (AUC={best_val_auc:.4f})")
-
-    # 绘制二分类结果
-    plot_binary_training(train_loss_hist, val_loss_hist, train_acc_hist, val_acc_hist)
-
+    torch.save(classifier.state_dict(), "binary_classifier_model.pt")
+    print(f"Saved classifier (AUC={val_auc:.4f})")
 
 ###############################################################################
 # Main
