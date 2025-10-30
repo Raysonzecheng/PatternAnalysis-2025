@@ -36,7 +36,7 @@ def predict_classifier(model: nn.Module, data_loader: DataLoader, device: str):
             pred_classes = torch.argmax(logits, dim=1)
 
             preds.extend(pred_classes.cpu().numpy().tolist())
-            probs.extend(probabilities[:, 1].cpu().numpy().tolist()) 
+            probs.extend(probabilities[:, 1].cpu().numpy().tolist())  # positive class prob
             trues.extend(labels.cpu().numpy().tolist())
             logits_list.extend(logits.cpu().numpy().tolist())
 
@@ -72,11 +72,14 @@ def train_classifier(
     """
     Train a binary classification model and save best model (by validation AUC) to disk.
     """
-
+    best_val_auc = -1.0
 
     train_loss_per_epoch = []
     val_loss_per_epoch = []
-
+    train_acc_per_epoch = []
+    val_acc_per_epoch = []
+    train_auc_per_epoch = []
+    val_auc_per_epoch = []
 
     for epoch in range(epochs):
         model.train()
@@ -112,21 +115,106 @@ def train_classifier(
 
         avg_val_loss = float(np.mean(val_losses)) if val_losses else 0.0
 
-        
+        # Full metrics using predict function (gives AUC + acc)
+        train_preds, train_probs, train_trues, _ = predict_classifier(model, train_loader, device)
+        val_preds, val_probs, val_trues, _ = predict_classifier(model, val_loader, device)
+
+        train_acc = accuracy_score(train_trues, train_preds)
+        val_acc = accuracy_score(val_trues, val_preds)
+
+        try:
+            train_auc = roc_auc_score(train_trues, train_probs)
+        except ValueError:
+            train_auc = float('nan')
+
+        try:
+            val_auc = roc_auc_score(val_trues, val_probs)
+        except ValueError:
+            val_auc = float('nan')
+
+        # Scheduler step (we assume scheduler expects metric to maximize)
+        # ReduceLROnPlateau expects a scalar (we use val_auc when valid, else val_loss)
+        if isinstance(scheduler, ReduceLROnPlateau):
+            metric_for_scheduler = val_auc if not np.isnan(val_auc) else avg_val_loss
+            scheduler.step(metric_for_scheduler)
+        else:
+            # if other scheduler that uses epoch, step() accordingly
+            try:
+                scheduler.step()
+            except Exception:
+                pass
 
         # Record
         train_loss_per_epoch.append(avg_train_loss)
         val_loss_per_epoch.append(avg_val_loss)
-
+        train_acc_per_epoch.append(train_acc)
+        val_acc_per_epoch.append(val_acc)
+        train_auc_per_epoch.append(train_auc)
+        val_auc_per_epoch.append(val_auc)
 
         # Print progress
         print(
             f"[{strftime('%H:%M:%S', gmtime())}] Epoch {epoch+1:>2}/{epochs} "
+            f"Train Loss: {avg_train_loss:.4f} Acc: {train_acc:.4f} AUC: {train_auc:.4f} | "
+            f"Val Loss: {avg_val_loss:.4f} Acc: {val_acc:.4f} AUC: {val_auc:.4f}"
         )
 
- 
+        # Save best model by validation AUC
+        if not np.isnan(val_auc) and val_auc > best_val_auc:
+            best_val_auc = val_auc
+            torch.save(model.state_dict(), "binary_classifier_model.pt")
+            print(f"New best model saved (val AUC = {best_val_auc:.4f})")
 
-   
+    # Plot learning curves
+    plot_training_graphs(
+        train_loss_per_epoch, val_loss_per_epoch,
+        train_acc_per_epoch, val_acc_per_epoch,
+        train_auc_per_epoch, val_auc_per_epoch,
+        epochs
+    )
+
+
+def plot_training_graphs(
+    train_loss_per_epoch,
+    val_loss_per_epoch,
+    train_acc_per_epoch,
+    val_acc_per_epoch,
+    train_auc_per_epoch,
+    val_auc_per_epoch,
+    epochs: int
+) -> None:
+    plt.figure(figsize=(15, 5))
+
+    # Loss
+    plt.subplot(1, 3, 1)
+    plt.plot(range(1, epochs + 1), train_loss_per_epoch, label='Train Loss')
+    plt.plot(range(1, epochs + 1), val_loss_per_epoch, label='Val Loss')
+    plt.title('Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    # Accuracy
+    plt.subplot(1, 3, 2)
+    plt.plot(range(1, epochs + 1), train_acc_per_epoch, label='Train Acc')
+    plt.plot(range(1, epochs + 1), val_acc_per_epoch, label='Val Acc')
+    plt.title('Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    # AUC
+    plt.subplot(1, 3, 3)
+    plt.plot(range(1, epochs + 1), train_auc_per_epoch, label='Train AUC')
+    plt.plot(range(1, epochs + 1), val_auc_per_epoch, label='Val AUC')
+    plt.title('AUC')
+    plt.xlabel('Epoch')
+    plt.ylabel('AUC')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig('train_val_progress.png')
+    plt.close()
 
 
 ###############################################################################
