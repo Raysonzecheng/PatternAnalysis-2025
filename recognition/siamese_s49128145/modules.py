@@ -1,37 +1,57 @@
+import os
 import torch
 import torch.nn as nn
-import torchvision.models as models
-import torch.nn.functional as F
+from torchvision.models import resnet50
+import numpy as np
 
-class SiameseNetwork(nn.Module):
-    def __init__(self):
-        super(SiameseNetwork, self).__init__()
-        base_model = models.resnet18(pretrained=True)
-        base_model.fc = nn.Identity()
-        self.feature_extractor = base_model
-        self.fc = nn.Sequential(
+class BinaryClassifier(nn.Module):
+    """
+    A binary classification model based on ResNet50.
+    The ResNet backbone is used as a feature extractor, and a few custom
+    fully connected layers are added for classification.
+    """
+    def __init__(self, emb_dim=128):
+        super(BinaryClassifier, self).__init__()
+
+        resnet = resnet50(weights="IMAGENET1K_V1")
+
+        self.feature_extractor = nn.Sequential(*list(resnet.children())[:-1])
+
+        self.fc_layers = nn.Sequential(
+            nn.Linear(2048, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
             nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128)
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(256, emb_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(emb_dim, 2)   
         )
 
-    def forward_once(self, x):
-        x = self.feature_extractor(x)
-        x = self.fc(x)
-        return F.normalize(x, p=2, dim=1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.feature_extractor(x)
+        out = out.view(out.size(0), -1)
+        out = self.fc_layers(out)
+        return out
 
-    def forward(self, x1, x2):
-        out1 = self.forward_once(x1)
-        out2 = self.forward_once(x2)
-        return out1, out2
+def get_config() -> dict:
+    config = {
+        'data_subset': 1000,  
+        'metadata_path': './data/train-metadata.csv',
+        'image_dir': './data/train-image/image/',
+        'batch_size': 16,
+        'learning_rate': 1e-4,
+        'epochs': 20,
+    }
+    return config
 
-class ContrastiveLoss(nn.Module):
-    def __init__(self, margin=1.0):
-        super(ContrastiveLoss, self).__init__()
-        self.margin = margin
 
-    def forward(self, output1, output2, label):
-        distances = F.pairwise_distance(output1, output2)
-        loss = torch.mean((1 - label) * torch.pow(distances, 2) +
-                          (label) * torch.pow(torch.clamp(self.margin - distances, min=0.0), 2))
-        return loss
+def set_seed(seed: int = 42) -> None:
+    np.random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    if torch.cuda.is_available():
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
