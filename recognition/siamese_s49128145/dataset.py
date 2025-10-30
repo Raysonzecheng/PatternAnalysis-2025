@@ -1,3 +1,11 @@
+"""
+This module prepares data for training a Triplet Network on the ISIC 2020 dataset.
+It includes:
+- TripletDataset: PyTorch dataset class that returns (anchor, positive, negative) triplets
+- get_isic2020_data: Loads image paths and labels from metadata
+- train_val_test_split_with_augmentation: Splits data and oversamples minority class
+- get_isic2020_data_loaders: Builds DataLoaders with augmentation
+"""
 import os
 import numpy as np
 import pandas as pd
@@ -7,6 +15,9 @@ from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 
+###############################################################################
+# TripletDataset: Dataset class for Triplet Network
+###############################################################################
 class TripletDataset(Dataset):
     """
     PyTorch dataset for Triplet Network training.
@@ -31,17 +42,21 @@ class TripletDataset(Dataset):
         anchor_path = self.images[idx]
         anchor_label = self.labels[idx]
 
+        # Sample positive (same class)
         pos_idx = np.random.choice(self.class_to_indices[anchor_label])
         pos_path = self.images[pos_idx]
 
+        # Sample negative (different class)
         neg_class = 1 - anchor_label
         neg_idx = np.random.choice(self.class_to_indices[neg_class])
         neg_path = self.images[neg_idx]
 
+        # Load and convert images to RGB
         anchor = cv2.cvtColor(cv2.imread(str(anchor_path)), cv2.COLOR_BGR2RGB)
         positive = cv2.cvtColor(cv2.imread(str(pos_path)), cv2.COLOR_BGR2RGB)
         negative = cv2.cvtColor(cv2.imread(str(neg_path)), cv2.COLOR_BGR2RGB)
 
+        # Apply transforms
         if self.transform:
             anchor = self.transform(anchor)
             positive = self.transform(positive)
@@ -55,8 +70,19 @@ class TripletDataset(Dataset):
         return anchor, positive, negative, anchor_label
 
 
+###############################################################################
+# get_isic2020_data: Load image paths and labels 
+###############################################################################
 def get_isic2020_data(metadata_path: str, image_dir: str, data_subset: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
-
+    """
+    Load ISIC 2020 image paths and labels.
+    Args:
+        metadata_path: Path to CSV metadata file
+        image_dir: Directory containing image files
+        data_subset: Optional number of samples to load (balanced)
+    Returns:
+        Tuple of image paths and labels as numpy arrays
+    """
     metadata = pd.read_csv(metadata_path)
     metadata['image_file'] = metadata['isic_id'].astype(str) + '.jpg'
     image_to_label = dict(zip(metadata['image_file'], metadata['target']))
@@ -73,8 +99,22 @@ def get_isic2020_data(metadata_path: str, image_dir: str, data_subset: Optional[
 
     labels = [image_to_label[os.path.basename(p)] for p in image_paths]
     return np.array(image_paths), np.array(labels)
+
+
+###############################################################################
+# train_val_test_split_with_augmentation: Split and oversample training data
+###############################################################################
 def train_val_test_split_with_augmentation(images: np.ndarray, labels: np.ndarray, aug_dir: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
- 
+    """
+    Split data into train/val/test sets and oversample minority class in training.
+    Args:
+        images: Array of image paths
+        labels: Array of binary labels
+        aug_dir: Optional directory for saving augmented images (unused)
+    Returns:
+        Train, val, test image paths and labels
+    """
+    
     # Initial split: 80% train, 20% other
     train_images, other_images, train_labels, other_labels = train_test_split(
         images, labels, test_size=0.2, stratify=labels, random_state=42
@@ -117,7 +157,22 @@ def train_val_test_split_with_augmentation(images: np.ndarray, labels: np.ndarra
 
     return train_images, val_images, test_images, train_labels, val_labels, test_labels
 
+###############################################################################
+# get_isic2020_data_loaders: Build PyTorch DataLoaders
+###############################################################################
 def get_isic2020_data_loaders(images, labels, train_bs=32, test_val_bs=320, aug_factor=1, aug_dir: Optional[str] = None):
+    """
+    Build PyTorch DataLoaders for training, validation, and testing.
+    Args:
+        images: Image paths
+        labels: Binary labels
+        train_bs: Batch size for training
+        test_val_bs: Batch size for validation and testing
+        aug_factor: Augmentation intensity multiplier
+        aug_dir: Optional directory for saving augmented images (unused)
+    Returns:
+        train_loader, val_loader, test_loader
+    """
 
     train_images, val_images, test_images, train_labels, val_labels, test_labels = train_val_test_split_with_augmentation(
         images, labels, aug_dir=aug_dir
