@@ -117,6 +117,9 @@ For data splitting, 80% of the dataset was used for training, 10% for validation
 
 ## Results
 ### Siamese Network Results
+
+After the 20th epoch, the training loss continues to decrease, but the model becomes overly saturated. This suggests a potential loss of generalization during training. Therefore, the training loop is limited to 20 epochs.
+
 **Loss Plot** 
 
 ![triplet_train_loss](./image/triplet_train_loss.png)
@@ -161,19 +164,27 @@ Loaded best Triplet model.
 
 **t-SNE Scatterplot** 
 
+The feature separation between benign and malignant classes is fairly effective, though some overlap remains in the middle region. In the future, more advanced strategies—such as hard mining—will be considered to further enhance discriminative performance.
+
 ![predict_tsne](./image/predict_tsne.png)
 
 ### Binary Classifier Results
-Train Loss: 0.3777 Acc: 0.8893 AUC: 0.9283 | Val Loss: 0.6276 Acc: 0.7152 AUC: 0.8449
-Saved classifier (AUC=0.8449)
 
-**Confusion Matrix/ Accuracy of Prediction** 
+Loaded pretrained Triplet and Binary Classifier models.
+Before oversampling: class_0 = 2000, class_1 = 467
+After oversampling: class_0 = 2000, class_1 = 2000
+Accuracy: 0.8117, AUC: 0.8888, Sensitivity: 0.793, Specificity: 0.816
+Final Test Accuracy: 0.8117, AUC: 0.8888
+
+**Confusion Matrix** 
 
 ![predict_confusion_matrix](./image/predict_confusion_matrix.png)
 
 **ROC AUC** 
 
 ![predict_roc_curve](./image/predict_roc_curve.png)
+
+The model achieved high performance in both accuracy and AUC, indicating reliable overall classification. An AUC of 0.8888 demonstrates strong stability and discriminative power across different threshold settings.
 
 ### Reproducability of Results
 Across multiple independent training runs, the Siamese network demonstrated high stability. The resulting loss curves and t-SNE visualizations were consistently similar in shape, indicating strong consistency in how the model learns the embedding space.
