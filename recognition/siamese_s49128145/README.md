@@ -2,7 +2,7 @@
 ## Project Introduction
 ### Project Summary and Aim
 
-The objective of this project is to develop a two-stage classifier based on a Siamese network architecture to perform binary classification on the ISIC 2020 Kaggle Challenge dataset, distinguishing between normal and melanoma skin lesions.
+The objective of this project is to develop a Siamese network-based classifier to perform binary classification on the ISIC 2020 Kaggle Challenge dataset, distinguishing between normal and melanoma skin lesions.
 
 The final model should achieve approximately 0.80 accuracy on the test set, demonstrating strong generalization performance on unseen dermoscopic images.
 
