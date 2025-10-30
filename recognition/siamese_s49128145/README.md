@@ -58,7 +58,7 @@ PatternAnalysis-2025/recognition/siamese_s49128145/
 ### Siamese Network Basics
 A Siamese Network is a neural architecture designed to learn similarity between inputs. It consists of identical subnetworks that share weights and are trained to produce similar outputs for similar inputs. In image classification tasks, Siamese networks are particularly useful for learning embeddings that capture visual similarity, making them ideal for few-shot learning, verification, and metric-based classification.
 
-![Siamese_Network](./images/Siamese_Network.png)
+![Siamese_Network](./image/Siamese_Network.png)
 
 ### Triplet Loss Basics
 Triplet Loss is a metric learning objective that encourages the network to map images into an embedding space where:
@@ -67,7 +67,7 @@ The anchor and negative (different class) are far apart
 
 Formally, the loss is defined as:
 
-![Triplet_Loss2](./images/Triplet_Loss2.png)
+![Triplet_Loss2](./image/Triplet_Loss2.png)
 
 Where:
 - 𝑓(𝑥) is the embedding of image 𝑥
@@ -76,14 +76,14 @@ Where:
 
 This loss function helps the model learn a discriminative feature space that improves downstream classification.
 
-![Triplet_Loss](./images/Triplet_Loss.png)
+![Triplet_Loss](./image/Triplet_Loss.png)
 
 ### Implementing the Siamese Network
 The core objective of the Siamese (Triplet) network is to train the Triplet Network to learn compact and discriminative embeddings that effectively represent the visual similarity between benign and malignant skin lesion images. In each training batch, the input consists of three images: an anchor, a positive sample, and a negative sample. The positive sample belongs to the same class as the anchor, while the negative sample comes from the opposite class. This triplet structure encourages the model to pull similar images closer together in the embedding space and push dissimilar ones farther apart, thereby achieving more discriminative feature representations.
 
 A pre-trained ResNet50 model was used as the feature extraction backbone. The final fully connected classification layer was removed, leaving the convolutional layers to output 2048-dimensional feature vectors. These features were then passed through a custom projection head with fully connected layers that reduced the dimension from 2048 → 512 → 128. The final 128-dimensional embeddings were L2-normalised, ensuring that the model compared features based on cosine-like distance rather than magnitude.
 
-![ResNet50](./images/ResNet50.png)
+![ResNet50](./image/ResNet50.png)
 
 The training used the standard Triplet Loss, where the margin was set to 1.0. This loss encourages the anchor-positive distance to be smaller than the anchor-negative distance by at least the margin.
 
@@ -103,9 +103,9 @@ For this project, the preprocessed ISIC 2020 dataset was used (Kaggle Source
 ). The dataset contains dermoscopic images resized to 256×256 pixels, making it easier to handle computationally and ensuring consistent input dimensions across all samples.
 The following are sample examples:
 
-![benign_collage](./images/benign_collage.png)
+![benign_collage](./image/benign_collage.png)
 
-![malignant_collage](./images/malignant_collage.png)
+![malignant_collage](./image/malignant_collage.png)
 
 The dataset was highly imbalanced, containing two classes — 32,543 benign samples and 585 malignant ones. To mitigate this imbalance, the data loader performed class-balanced sampling, ensuring a 1:1 ratio between benign and malignant samples within each split. This prevented the model from becoming biased toward the majority class.
 
@@ -119,7 +119,7 @@ For data splitting, 80% of the dataset was used for training, 10% for validation
 ### Siamese Network Results
 **Loss Plot** 
 
-![triplet_train_loss](./images/triplet_train_loss.png)
+![triplet_train_loss](./image/triplet_train_loss.png)
 
 Before oversampling: class_0 = 2000, class_1 = 467
 After oversampling: class_0 = 2000, class_1 = 2000
@@ -161,7 +161,7 @@ Loaded best Triplet model.
 
 **t-SNE Scatterplot** 
 
-![predict_tsne](./images/predict_tsne.png)
+![predict_tsne](./image/predict_tsne.png)
 
 ### Binary Classifier Results
 Train Loss: 0.3777 Acc: 0.8893 AUC: 0.9283 | Val Loss: 0.6276 Acc: 0.7152 AUC: 0.8449
@@ -169,11 +169,11 @@ Saved classifier (AUC=0.8449)
 
 **Confusion Matrix/ Accuracy of Prediction** 
 
-![predict_confusion_matrix](./images/predict_confusion_matrix.png)
+![predict_confusion_matrix](./image/predict_confusion_matrix.png)
 
 **ROC AUC** 
 
-![predict_roc_curve](./images/predict_roc_curve.png)
+![predict_roc_curve](./image/predict_roc_curve.png)
 
 ### Reproducability of Results
 Across multiple independent training runs, the Siamese network demonstrated high stability. The resulting loss curves and t-SNE visualizations were consistently similar in shape, indicating strong consistency in how the model learns the embedding space.
