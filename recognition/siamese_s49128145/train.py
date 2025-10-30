@@ -61,19 +61,61 @@ def plot_binary_training(train_loss, val_loss, train_acc, val_acc):
 
 ###############################################################################
 # Step 1: Train Triplet Network
-def train_end_to_end(train_loader, val_loader, triplet_model, classifier, optimizer, scheduler, epochs, device):
-    model = nn.Sequential(triplet_model, classifier).to(device)
+def train_triplet(train_loader, model, optimizer, scheduler, epochs, device):
+    best_loss = float('inf')
+    epoch_losses = []
+
+    for epoch in range(epochs):
+        model.train()
+        losses = []
+        for anchor, positive, negative in train_loader:
+            anchor, positive, negative = (
+                anchor.to(device).float(),
+                positive.to(device).float(),
+                negative.to(device).float()
+            )
+            optimizer.zero_grad()
+            emb_a, emb_p, emb_n = model(anchor, positive, negative)
+            loss = triplet_loss(emb_a, emb_p, emb_n)
+            loss.backward()
+            optimizer.step()
+            losses.append(loss.item())
+
+        avg_loss = np.mean(losses)
+        epoch_losses.append(avg_loss)
+
+        print(f"[{strftime('%H:%M:%S', gmtime())}] Epoch {epoch+1:>2}/{epochs} | Train Loss: {avg_loss:.4f}")
+        scheduler.step(avg_loss)
+
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            torch.save(model.state_dict(), "triplet_model.pt")
+            print(f"Saved model with lowest loss: {avg_loss:.4f}")
+
+    # 绘制 triplet loss
+    plot_triplet_loss(epoch_losses)
+    return epoch_losses
+
+
+###############################################################################
+# Step 2b: Binary classifier training
+def train_binary_classifier(train_loader, val_loader, triplet_model, classifier, optimizer, scheduler, epochs, device):
+    for param in triplet_model.parameters():
+        param.requires_grad = False  # freeze encoder
+
     best_val_auc = -1
     train_loss_hist, val_loss_hist = [], []
     train_acc_hist, val_acc_hist = [], []
 
     for epoch in range(epochs):
-        model.train()
+        classifier.train()
         train_losses, train_preds, train_labels = [], [], []
 
         for img, label in train_loader:
             img, label = img.to(device).float(), label.to(device).float()
-            output = model(img).squeeze()
+            with torch.no_grad():
+                emb = triplet_model.encode(img)
+            output = classifier(emb).squeeze()
             loss = nn.BCELoss()(output, label)
             optimizer.zero_grad()
             loss.backward()
@@ -90,12 +132,13 @@ def train_end_to_end(train_loader, val_loader, triplet_model, classifier, optimi
         train_auc = roc_auc_score(train_labels, train_preds)
 
         # Validation
-        model.eval()
+        classifier.eval()
         val_losses, val_preds, val_labels = [], [], []
         with torch.no_grad():
             for img, label in val_loader:
                 img, label = img.to(device).float(), label.to(device).float()
-                output = model(img).squeeze()
+                emb = triplet_model.encode(img)
+                output = classifier(emb).squeeze()
                 val_losses.append(nn.BCELoss()(output, label).item())
                 val_preds.append(output.cpu())
                 val_labels.append(label.cpu())
@@ -109,6 +152,7 @@ def train_end_to_end(train_loader, val_loader, triplet_model, classifier, optimi
         except ValueError:
             val_auc = float('nan')
 
+        # 保存历史
         train_loss_hist.append(avg_train_loss)
         val_loss_hist.append(avg_val_loss)
         train_acc_hist.append(train_acc)
@@ -125,9 +169,10 @@ def train_end_to_end(train_loader, val_loader, triplet_model, classifier, optimi
 
         if not np.isnan(val_auc) and val_auc > best_val_auc:
             best_val_auc = val_auc
-            torch.save(model.state_dict(), "end_to_end_model.pt")
-            print(f"Saved best end-to-end model (AUC={best_val_auc:.4f})")
+            torch.save(classifier.state_dict(), "binary_classifier_model.pt")
+            print(f"Saved best classifier (AUC={best_val_auc:.4f})")
 
+    # 绘制二分类结果
     plot_binary_training(train_loss_hist, val_loss_hist, train_acc_hist, val_acc_hist)
 
 
@@ -138,6 +183,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = get_config()
 
+    # === 数据加载 ===
     images, labels = get_isic2020_data(
         metadata_path=config['metadata_path'],
         image_dir=config['image_dir'],
@@ -150,12 +196,21 @@ def main():
         train_bs=config['batch_size']
     )
 
-    triplet_model = TripletNetwork(emb_dim=config.get('embedding_dims', 128))
-    classifier = BinaryClassifier(emb_dim=config.get('embedding_dims', 128))
-    optimizer = optim.Adam(list(triplet_model.parameters()) + list(classifier.parameters()), lr=config['learning_rate'])
+    # === Step 1: 训练 Triplet ===
+    triplet_model = TripletNetwork(emb_dim=config.get('embedding_dims', 128)).to(device)
+    optimizer = optim.Adam(triplet_model.parameters(), lr=config['learning_rate'])
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
-    train_end_to_end(train_loader, val_loader, triplet_model, classifier, optimizer, scheduler, config['epochs'], device)
+    train_triplet(train_loader, triplet_model, optimizer, scheduler, config['epochs'], device)
+    triplet_model.load_state_dict(torch.load("triplet_model.pt"))
+    print("Loaded best Triplet model.")
+
+    # === Step 2: Binary classifier ===
+    classifier = BinaryClassifier(emb_dim=config.get('embedding_dims', 128)).to(device)
+    optimizer_cls = optim.Adam(classifier.parameters(), lr=config['learning_rate'])
+    scheduler_cls = ReduceLROnPlateau(optimizer_cls, mode='min', factor=0.5, patience=5)
+
+    train_binary_classifier(train_loader, val_loader, triplet_model, classifier, optimizer_cls, scheduler_cls, config['epochs'], device)
 
 
 if __name__ == "__main__":
