@@ -124,6 +124,7 @@ After the 20th epoch, the training loss continues to decrease, but the model bec
 
 ![triplet_train_loss](./image/triplet_train_loss.png)
 
+```
 Before oversampling: class_0 = 2000, class_1 = 467
 After oversampling: class_0 = 2000, class_1 = 2000
 [17:22:38] Epoch  1/20 | Train Loss: 0.8758
@@ -161,6 +162,7 @@ Saved model with lowest loss: 0.4625
 [23:03:45] Epoch 20/20 | Train Loss: 0.4293
 Saved model with lowest loss: 0.4293
 Loaded best Triplet model.
+```
 
 **t-SNE Scatterplot** 
 
@@ -170,11 +172,13 @@ The feature separation between benign and malignant classes is fairly effective,
 
 ### Binary Classifier Results
 
+```
 Loaded pretrained Triplet and Binary Classifier models.
 Before oversampling: class_0 = 2000, class_1 = 467
 After oversampling: class_0 = 2000, class_1 = 2000
 Accuracy: 0.8117, AUC: 0.8888, Sensitivity: 0.793, Specificity: 0.816
 Final Test Accuracy: 0.8117, AUC: 0.8888
+```
 
 **Confusion Matrix** 
 
